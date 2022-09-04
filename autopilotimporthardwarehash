@@ -1,0 +1,68 @@
+
+# This script does not import hardware hash directly because it is intended to send the hardware hash to a fucntion URL as rest POST call and from there you need to have a separate script to import the hardware hash.
+
+
+# Variable declaration
+
+$DeviceHashData = ((Get-WmiObject -Namespace "root/cimv2/mdm/dmmap" -Class "MDM_DevDetail_Ext01" -Filter "InstanceID='Ext' AND ParentID='./DevDetail'" -Verbose:$false).DeviceHardwareData).trim()
+$SerialNumber = ((Get-WmiObject -Class "Win32_BIOS" -Verbose:$false).SerialNumber).trim()
+$ProductKey = ((Get-WmiObject -Class "SoftwareLicensingService" -Verbose:$false).OA3xOriginalProductKey).trim()
+$dvcComputerName = $env:COMPUTERNAME
+$PublicIPAddress = (Invoke-WebRequest -uri "http://ifconfig.me/ip" -UseBasicParsing).Content
+$GroupTag = "NameyourownNameforthis"
+$UserName = "$env:USERNAME"
+$OSbuild = (Get-WmiObject -class Win32_OperatingSystem).BuildNumber
+$Model = (Get-WmiObject -class win32_computersystem).SystemFamily
+$SKU = (Get-WmiObject -class win32_computersystem).SystemSKUNumber
+$Manufacturer = (Get-WmiObject -class win32_computersystem).Manufacturer
+
+# Check conditions are met
+
+if (($SerialNumber) -and ($DeviceHashData) -and ($GroupTag)){
+
+# if above conditions returned true, collect data in a hash table
+
+$hash = New-Object PSObject -Property @{
+    groupTag                  = if ($GroupTag) { "$($GroupTag)" } else { "" }
+    serialNumber              = "$($SerialNumber)"
+    productKey                = if ($ProductKey) { "$($ProductKey)" } else { "" }
+    hardwareIdentifier        = "$($DeviceHashData)"
+    assignedUserPrincipalName = if ($UserName) { "$($UserName)" } else { "" }
+    Manufacturer              = "$($Manufacturer)"
+    deviceName                = if ($dvcComputerName) { "$($dvcComputerName)" } else { "" }
+    PublicIP                  = if ($PublicIPAddress) { "$($PublicIPAddress)" } else { "" }
+    OsBuildNumber             = if ($OSbuild) { "$($OSbuild)" } else { "" }
+    SKU                       = if ($SKU) { "$($SKU)" } else { "" }
+    Model                     = if ($Model) { "$($Model)" } else { "" }
+
+}
+   
+# Convert PSObject into JSON body
+
+$collectedResults = $hash | select-object groupTag,Model,serialNumber,productKey,hardwareIdentifier,deviceName,PublicIP,assignedUserPrincipalName,SKU,OsBuildNumber,Manufacturer
+$collectedJson = ConvertTo-Json -InputObject $collectedResults
+
+
+$Header = @{ $date = "Get-Date -Format u" }
+
+# Need to add the Fucntion URL below
+
+$Autopilot_Device_Import = ""
+
+# Post collected JSON body to flow endpoint.
+
+try{      
+   Invoke-RestMethod -Method POST -Uri $Autopilot_Device_Import -Body $collectedJson -Headers $Header -ContentType 'application/json'
+   LogWrite "$(get-date -format "yyyy-MM-dd HH:mm:ss") Device Hardhash Imported Successfully. it takes about 4-5 Mins to complete the process.."
+}
+catch
+   {
+   LogWrite "$(get-date -format "yyyy-MM-dd HH:mm:ss") $_"
+}
+
+} else{
+
+write-host "Some of the properties fetched from your device are missing. please try again."
+
+}
+
